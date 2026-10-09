@@ -308,7 +308,7 @@
         scene.add(peSensor);
 
         let lastTime = performance.now();
-        const FIXED_CAN_DISTANCE = 1.4; // Fixed center-to-center spacing (3D units)
+        const FIXED_CAN_DISTANCE = 1.65; // Approx. 1.5 can-width visible spacing between cans
         let spawnAccumulator = FIXED_CAN_DISTANCE; // First can enters immediately
         let frameId;
         let disposed = false;
