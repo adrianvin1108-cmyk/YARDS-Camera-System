@@ -115,6 +115,27 @@
       const defectQueueRef = useRef([]);
       const [lastQueuedDefect, setLastQueuedDefect] = useState(null);
       const [viewPreset, setViewPreset] = useState('isometric');
+      const [emergency, setEmergency] = useState(false);
+      const [challenge, setChallenge] = useState(false);
+      const [challengeResult, setChallengeResult] = useState(null);
+      const [challengeType, setChallengeType] = useState('BENT_RIM');
+      const [lightLevel, setLightLevel] = useState(85);
+      const [alignment, setAlignment] = useState(0);
+      const [calibrationMode, setCalibrationMode] = useState(false);
+      const [replay, setReplay] = useState(null);
+      const [replayPlaying, setReplayPlaying] = useState(false);
+      const [workflowStage, setWorkflowStage] = useState(0);
+      const [history, setHistory] = useState([]);
+      const [lastLatency, setLastLatency] = useState(18);
+      const replayEventRef = useRef(null);
+      const lightRef = useRef(lightLevel);
+      const alignmentRef = useRef(alignment);
+      lightRef.current = lightLevel;
+      alignmentRef.current = alignment;
+      const restart = () => {setEmergency(false);setIsRunning(true);};
+      const emergencyStop = () => {setEmergency(true);setIsRunning(false);setReplayPlaying(false);};
+      const startChallenge = () => {setChallenge(true);setAutoDefectRate(0);setChallengeResult('Queued: '+DEFECT_TYPES[challengeType].name);queueDefect(challengeType);setIsRunning(true);setEmergency(false);};
+      const replayLast = () => {if (replay) {setReplayPlaying(true);setViewPreset('reject');}};
       
       const [currentScan, setCurrentScan] = useState({
         canId: 'CAN-000',
@@ -135,6 +156,8 @@
         lastEjectTime: '--'
       });
 
+      const qualityScore = Math.max(30, Math.min(100, Math.round(100 - Math.abs(cameraWD - 450)*0.035 - Math.abs(cameraHeight - 420)*0.015 - Math.abs(alignment)*4 - Math.abs(lightLevel-85)*0.3)));
+      const defectPercent = stats.totalInspected ? (100*stats.totalFailed/stats.totalInspected).toFixed(1) : '0.0';
       const [logs, setLogs] = useState([]);
       const [logFilter, setLogFilter] = useState('ALL');
 
@@ -150,6 +173,11 @@
       const canSizeRef = useRef(canSize);
       const autoRateRef = useRef(autoDefectRate);
       const appearanceRef = useRef(canAppearance);
+      const replayRef = useRef(false);
+      const sceneCameraRef = useRef(null);
+      const sceneRendererRef = useRef(null);
+      const sceneLightRef = useRef(null);
+      const rigBodyRef = useRef(null);
       const spawnRef = useRef(null);
       const inspectRef = useRef(null);
       const rejectRef = useRef(null);
@@ -160,6 +188,7 @@
       canSizeRef.current = canSize;
       autoRateRef.current = autoDefectRate;
       appearanceRef.current = canAppearance;
+      replayRef.current = replayPlaying;
 
       // Update cans already traveling on the conveyor as well as future cans.
       useEffect(() => {
@@ -220,8 +249,10 @@
 
         const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
         camera.position.set(2.8, 2.5, 3.2);
+        sceneCameraRef.current = camera;
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        sceneRendererRef.current = renderer;
         renderer.setSize(width, height);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
@@ -241,6 +272,7 @@
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
         scene.add(dirLight);
+        sceneLightRef.current = dirLight;
 
         // Conveyor Line
         const conveyorGroup = new THREE.Group();
@@ -299,6 +331,7 @@
         const camBodyGroup = new THREE.Group();
         camBodyGroup.position.set(0, 1.8, 0);
         gantryGroup.add(camBodyGroup);
+        rigBodyRef.current = camBodyGroup;
 
         const keyenceBodyGeo = new THREE.BoxGeometry(0.2, 0.28, 0.2);
         const keyenceMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.2 });
@@ -401,6 +434,10 @@
                   inspectRef.current?.(canObj);
                 }
 
+                if (canObj.isDefect && canObj.inspected && !canObj.tracking && canObj.mesh.position.x >= 0.6) {
+                  canObj.tracking = true;
+                  setWorkflowStage(3);
+                }
                 if (canObj.isDefect && !canObj.ejectionTriggered && canObj.mesh.position.x >= 2.15) {
                   canObj.ejectionTriggered = true;
                   rejectRef.current?.(canObj);
@@ -424,6 +461,7 @@
             }
           }
 
+          if (sceneLightRef.current) sceneLightRef.current.intensity = 0.3 + lightRef.current / 100;
           renderer.render(scene, camera);
         };
 
@@ -453,6 +491,9 @@
           });
           renderer.dispose();
           cansRef.current = [];
+          sceneCameraRef.current = null;
+          sceneRendererRef.current = null;
+          rigBodyRef.current = null;
         };
       }, []);
 
@@ -544,15 +585,25 @@
           labelMesh.scale.set(1.06, 1, 1.06);
           rimMesh.scale.set(1.06, 1.06, 1.06);
         } else if (currentDefect === 'BENT_RIM') {
-          rimMesh.rotation.z = 0.35;
-          rimMesh.position.x += 0.03;
+          rimMesh.rotation.z = 0.34;
+          rimMesh.scale.x = 1.12;
+          rimMesh.position.x += 0.055;
+          lid.rotation.z = 0.18;
+          score.rotation.z = 0.18;
         } else if (currentDefect === 'DENT') {
-          body.scale.set(0.85, 1, 1.15);
-          labelMesh.scale.set(0.85, 1, 1.15);
+          const dentMesh = new THREE.Mesh(new THREE.SphereGeometry(r*.22,20,12),
+            new THREE.MeshStandardMaterial({color:0x46586a,metalness:.7,roughness:.32}));
+          dentMesh.scale.set(.38,1.4,.27);
+          dentMesh.position.set(r*.89,.02,0);
+          canGroup.add(dentMesh);
+          body.scale.set(.94,1,1.03);
+          labelMesh.scale.set(.94,1,1.03);
         } else if (currentDefect === 'CRUSHED') {
           body.scale.set(1.05, 0.8, 1.05);
           labelMesh.scale.set(1.05, 0.8, 1.05);
           rimMesh.position.y *= 0.82;
+          rimMesh.rotation.x = 0.16;
+          lid.position.y *= 0.85;
         } else if (currentDefect === 'CONTAMINATION') {
           const stainGeo = new THREE.CircleGeometry(0.12, 16);
           stainGeo.rotateX(-Math.PI / 2);
@@ -565,6 +616,7 @@
         const idStr = `CAN-${canIdCounter.current++}`;
         canGroup.position.set(-4.8, 0.92 + h / 2, 0);
         sceneRef.current.add(canGroup);
+        setWorkflowStage(1);
 
         cansRef.current.push({
           id: idStr,
@@ -574,7 +626,9 @@
           isDefect: currentDefect !== 'NONE',
           defectType: currentDefect,
           ejected: false,
-          ejectionTriggered: false
+          ejectionTriggered: false,
+          specification: spec,
+          appearance: appearanceRef.current
         });
       };
 
@@ -586,6 +640,8 @@
         let measuredID = spec.id;
         let circularity = 99.6;
         let confidence = 99.4;
+        const simulatedQuality = Math.max(55, Math.min(100, 100 - Math.abs(cameraWD-450)*.035 - Math.abs(cameraHeight-420)*.015 - Math.abs(alignmentRef.current)*4 - Math.abs(lightRef.current-85)*.3));
+        confidence = Math.min(confidence, simulatedQuality);
 
         if (isFail) {
           if (canObj.defectType === 'BENT_RIM') {
@@ -614,9 +670,16 @@
           circularity: parseFloat(circularity.toFixed(1)),
           confidence: parseFloat(confidence.toFixed(1)),
           defectType: canObj.defectType,
-          timestamp: new Date().toLocaleTimeString()
+          timestamp: new Date().toLocaleTimeString(),
+          quality: simulatedQuality,
+          source: 'SIMULATED',
+          latency: 14 + Math.round((100-simulatedQuality)*.4)
         };
 
+        setWorkflowStage(2);
+        setLastLatency(scanResult.latency);
+        setHistory(prev => [...prev.slice(-39), {n:stats.totalInspected+1, passed:isFail?0:1, failed:isFail?1:0}]);
+        if (challenge && isFail) {setChallengeResult('Detected '+DEFECT_TYPES[canObj.defectType].name+' • FAIL • '+canObj.id);setChallenge(false);}
         setCurrentScan(scanResult);
 
         setStats(prev => ({
@@ -631,6 +694,10 @@
 
       const triggerAirReject = (canObj) => {
         canObj.ejected = true;
+        setWorkflowStage(4);
+        const event = {id:canObj.id, defect:canObj.defectType, label:DEFECT_TYPES[canObj.defectType].name, time:new Date().toLocaleTimeString()};
+        replayEventRef.current = event;
+        setReplay(event);
         
         if (pusherMeshRef.current) {
           pusherMeshRef.current.position.z = -0.05;
@@ -658,6 +725,34 @@
           } 
         }
       }, [cameraHeight, cameraWD]);
+
+      useEffect(() => {
+        if (!replayPlaying || !replay) return;
+        const scene=sceneRef.current;
+        if (!scene) return;
+        const material=new THREE.MeshStandardMaterial({color:0xf59e0b,metalness:.7,roughness:.25,transparent:true,opacity:.9});
+        const replayCan=new THREE.Group();
+        const body=new THREE.Mesh(new THREE.CylinderGeometry(.31,.33,.68,48),material);
+        replayCan.add(body);
+        const top=new THREE.Mesh(new THREE.TorusGeometry(.28,.022,12,48),new THREE.MeshStandardMaterial({color:0xfde68a,metalness:.8,roughness:.26}));
+        top.rotation.x=Math.PI/2;top.position.y=.35;replayCan.add(top);
+        replayCan.position.set(1.5,1.27,0);
+        scene.add(replayCan);
+        let requestId, start=null;
+        const run=time=>{
+          if (start===null)start=time;
+          const progress=Math.min(1,(time-start)/3800);
+          replayCan.position.x=1.5+Math.min(1,progress*2)*.7;
+          if(progress>.42){const t=(progress-.42)/.58;replayCan.position.z=Math.min(1,t)*2.5;replayCan.position.y=1.27-Math.min(1,t)*.8;replayCan.rotation.z=t*2.8;}
+          if(progress<1)requestId=requestAnimationFrame(run);else setReplayPlaying(false);
+        };
+        requestId=requestAnimationFrame(run);
+        return ()=>{cancelAnimationFrame(requestId);scene.remove(replayCan);replayCan.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});};
+      },[replayPlaying,replay]);
+
+      useEffect(() => {
+        if (rigBodyRef.current) rigBodyRef.current.rotation.z = alignment * Math.PI / 180;
+      }, [alignment]);
 
       const filteredLogs = useMemo(() => {
         if (logFilter === 'PASS') return logs.filter(l => l.status === 'PASS');
@@ -694,6 +789,8 @@
 
             <nav className="flex flex-wrap items-center gap-1">
               <a href="#simulation" className="px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950">⬡ 3D Prototype CAD</a>
+              <a href="#advanced" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Advanced</a>
+              <a href="#analytics" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Analytics</a>
               <a href="#vision" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Vision HUD</a>
               <a href="#workflow" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Workflow</a>
               <a href="#architecture" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Architecture</a>
@@ -702,7 +799,7 @@
 
             <div className="flex items-center space-x-3">
               <button 
-                onClick={() => setIsRunning(!isRunning)} 
+                onClick={() => { if (!emergency) setIsRunning(!isRunning); }} 
                 className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${isRunning ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'}`}
               >
                 <span>{isRunning ? 'Pause Line' : 'Resume Line'}</span>
@@ -730,6 +827,9 @@
                 {/* 3D Canvas Viewport */}
                 <div className="relative w-full h-[690px] md:h-[640px] overflow-hidden shadow-2xl flex flex-col">
                   <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+                  {calibrationMode && <div className="absolute inset-0 z-[5] pointer-events-none flex items-center justify-center opacity-70"><div className="w-52 h-52 border border-cyan-400 rounded-full relative"><div className="absolute inset-x-0 top-1/2 border-t border-cyan-400"/><div className="absolute inset-y-0 left-1/2 border-l border-cyan-400"/><div className="absolute -bottom-7 left-0 text-xs text-cyan-300 font-mono">CAL TARGET • {qualityScore}% quality</div></div></div>}
+                  {emergency && <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 bg-red-700 px-5 py-2 rounded font-bold tracking-wider">EMERGENCY STOP</div>}
+                  {replayPlaying && <div className="absolute top-5 left-1/2 -translate-x-1/2 z-20 bg-amber-700 px-5 py-2 rounded font-bold">0.25× REJECT REPLAY</div>}
                   <div className="pointer-events-none absolute top-4 left-4 hidden md:block z-10 w-72 rounded-xl border border-slate-700 bg-[#0f192d]/95 p-4 shadow-2xl">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-700"><span className="text-xs font-bold text-amber-300">⌁ LINE TELEMETRY</span><span className={`text-[10px] font-mono px-2 py-1 rounded ${isRunning ? 'text-emerald-400 bg-emerald-950' : 'text-amber-400 bg-amber-950'}`}>{isRunning ? 'RUNNING' : 'PAUSED'}</span></div>
                     <div className="mt-3 space-y-2 font-mono text-[11px]">
@@ -870,6 +970,54 @@
               </div>
             </section>
 
+            {/* NEW INSPECTION CONTROL DECK */}
+            <section id="advanced" className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+              <div className="glass-panel rounded-2xl p-5 space-y-4">
+                <h2 className="text-amber-300 font-bold">⚙ Safety &amp; Defect Challenge</h2>
+                <p className="text-xs text-slate-400">Simulated safety controls. Not connected to factory equipment.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={emergencyStop} className="flex-1 bg-red-700 hover:bg-red-600 rounded-lg px-4 py-3 font-black">■ E-STOP</button>
+                  <button onClick={restart} className="flex-1 bg-emerald-800 hover:bg-emerald-700 rounded-lg px-4 py-3 font-bold">↻ RESET &amp; RUN</button>
+                </div>
+                {emergency && <p className="text-red-400 text-sm font-bold">EMERGENCY STOP ACTIVE • Line halted</p>}
+                <label className="text-xs text-slate-300 block">Challenge defect type</label>
+                <select value={challengeType} onChange={e=>setChallengeType(e.target.value)} className="w-full bg-slate-900 p-2 rounded border border-slate-700 text-sm">
+                  {Object.keys(DEFECT_TYPES).filter(k=>k!=='NONE').map(k=><option key={k} value={k}>{DEFECT_TYPES[k].name}</option>)}
+                </select>
+                <button onClick={startChallenge} className="w-full bg-amber-600 hover:bg-amber-500 rounded p-3 text-slate-950 font-bold">▶ Run Defect Challenge</button>
+                {challengeResult && <p className="text-xs font-mono text-amber-300">{challengeResult}</p>}
+              </div>
+              <div className="glass-panel rounded-2xl p-5 space-y-3">
+                <h2 className="text-cyan-300 font-bold">◎ Camera Calibration Lab</h2>
+                <label className="flex gap-2 text-xs items-center"><input type="checkbox" checked={calibrationMode} onChange={e=>setCalibrationMode(e.target.checked)} /> Enable calibration overlay</label>
+                <div className="text-xs flex justify-between"><span>Light intensity</span><span>{lightLevel}%</span></div>
+                <input type="range" min="10" max="100" value={lightLevel} onChange={e=>setLightLevel(Number(e.target.value))} className="w-full" />
+                <div className="text-xs flex justify-between"><span>Camera tilt</span><span>{alignment}°</span></div>
+                <input type="range" min="-12" max="12" value={alignment} onChange={e=>setAlignment(Number(e.target.value))} className="w-full" />
+                <div className="flex justify-between text-sm"><span className="text-slate-400">Simulated image quality</span><strong className={qualityScore>=85?'text-emerald-400':'text-amber-400'}>{qualityScore}%</strong></div>
+                <button onClick={()=>{setCameraWD(450);setCameraHeight(420);setLightLevel(85);setAlignment(0);}} className="text-xs rounded border border-sky-700 p-2 text-cyan-300">Restore nominal calibration</button>
+                <p className="text-[11px] text-slate-500">Heuristic quality model only. Calibration values are not validated against hardware.</p>
+              </div>
+              <div className="glass-panel rounded-2xl p-5 space-y-3">
+                <h2 className="text-rose-300 font-bold">◷ Slow-Motion Reject Replay</h2>
+                <p className="text-xs text-slate-400">Replays the most recently rejected can with a 3.8-second visualization.</p>
+                <p className="font-mono text-sm">{replay ? replay.id+' · '+replay.label : 'Waiting for first rejection'}</p>
+                <button disabled={!replay || replayPlaying} onClick={replayLast} className="w-full rounded bg-rose-900 disabled:opacity-40 hover:bg-rose-800 p-3 font-semibold">{replayPlaying?'▶ Replaying…':'↺ Replay Rejection at 0.25×'}</button>
+                <p className="text-[11px] text-slate-500">Replay ghost is a separate visualization; actual can flow continues.</p>
+              </div>
+            </section>
+
+            <section id="analytics" className="glass-panel rounded-2xl p-5 space-y-4">
+              <h2 className="text-lg font-bold text-white">Live Production Analytics <span className="text-xs font-normal text-cyan-300">• Simulation</span></h2>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[["Inspected",stats.totalInspected],["Passed",stats.totalPassed],["Failed",stats.totalFailed],["Rejected",stats.airEjections],["Defect rate",defectPercent+'%']].map(([name,num])=><div key={name} className="bg-slate-900 p-3 rounded-lg border border-slate-700"><div className="text-xs text-slate-400">{name}</div><div className="text-xl font-mono font-bold text-cyan-300">{num}</div></div>)}
+              </div>
+              <div className="flex gap-1 items-end h-24 bg-slate-950/70 rounded-lg border border-slate-800 p-2">
+                {history.length===0?<p className="text-xs text-slate-500">Waiting for inspection events…</p>:history.map((h,i)=><div key={i} title={'Inspection '+h.n+(h.failed?' FAIL':' PASS')} className={'flex-1 min-w-[3px] max-w-5 rounded-t '+(h.failed?'bg-red-500':'bg-emerald-500')} style={{height:h.failed?'88%':'50%'}} />)}
+              </div>
+              <p className="text-xs text-slate-500">Recent inspections, green = PASS, red = FAIL. Results are simulated and are not model accuracy measurements.</p>
+            </section>
+
             {/* SECTION 2: VISION HUD & OPENCV METRICS */}
             <section id="vision" className="space-y-4">
               <h2 className="text-xl font-bold text-white tracking-wide">Keyence VS-C320 Vision Inspection HUD</h2>
@@ -890,6 +1038,8 @@
                         <div className="w-2.5 h-2.5 rounded-full bg-sky-400"></div>
                       </div>
                     </div>
+                    <div className="absolute top-3 left-3 font-mono text-[10px] text-cyan-300 bg-slate-900/90 rounded p-2">SIMULATED VISION OVERLAY • {lastLatency} ms<br/>OD ring ✓ • ID ring ✓<br/>{currentScan.status==='FAIL'?'⚠ '+DEFECT_TYPES[currentScan.defectType].name:'● Geometry within spec'}</div>
+                    {currentScan.status==='FAIL' && <div className="absolute w-40 h-40 rounded-full border-2 border-red-500/80 animate-pulse pointer-events-none"/>}
                     <div className="absolute bottom-3 left-3 text-xs font-mono text-slate-400 bg-slate-900/90 p-2 rounded">
                       <div>Measured OD: {currentScan.measuredOD} mm</div>
                       <div>Measured ID: {currentScan.measuredID} mm</div>
@@ -924,24 +1074,24 @@
 
             {/* SECTION 3: PROCESS WORKFLOW */}
             <section id="workflow" className="space-y-4">
-              <h2 className="text-xl font-bold text-white tracking-wide">System Workflow</h2>
+              <h2 className="text-xl font-bold text-white tracking-wide">Interactive System Workflow <span className="text-xs text-cyan-300">• last stage: {['Waiting','Detected','Inspected','Tracking','Rejected'][workflowStage]}</span></h2>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center font-mono">
-                <div className="glass-panel p-5 rounded-xl border-sky-500/40 space-y-2">
+                <div className={`glass-panel p-5 rounded-xl space-y-2 border ${workflowStage===1 ? 'border-amber-400 bg-amber-900/15' : 'border-sky-500/40'}`} >
                   <div className="text-sky-400 text-xs font-bold">STEP 1</div>
                   <div className="text-base font-bold text-white">DETECT</div>
                   <p className="text-xs text-slate-400">Photoelectric sensor senses can arrival and triggers camera shutter.</p>
                 </div>
-                <div className="glass-panel p-5 rounded-xl border-sky-500/40 space-y-2">
+                <div className={`glass-panel p-5 rounded-xl space-y-2 border ${workflowStage===2 ? 'border-amber-400 bg-amber-900/15' : 'border-sky-500/40'}`} >
                   <div className="text-sky-400 text-xs font-bold">STEP 2</div>
                   <div className="text-base font-bold text-white">DECIDE</div>
                   <p className="text-xs text-slate-400">OpenCV / AI runs rim geometric checks within 18ms latency.</p>
                 </div>
-                <div className="glass-panel p-5 rounded-xl border-sky-500/40 space-y-2">
+                <div className={`glass-panel p-5 rounded-xl space-y-2 border ${workflowStage===3 ? 'border-amber-400 bg-amber-900/15' : 'border-sky-500/40'}`} >
                   <div className="text-sky-400 text-xs font-bold">STEP 3</div>
                   <div className="text-base font-bold text-white">TRACK</div>
                   <p className="text-xs text-slate-400">Defective can is tracked downstream over 2.2 meter distance.</p>
                 </div>
-                <div className="glass-panel p-5 rounded-xl border-sky-500/40 space-y-2">
+                <div className={`glass-panel p-5 rounded-xl space-y-2 border ${workflowStage===4 ? 'border-amber-400 bg-amber-900/15' : 'border-sky-500/40'}`} >
                   <div className="text-sky-400 text-xs font-bold">STEP 4</div>
                   <div className="text-base font-bold text-white">REMOVE</div>
                   <p className="text-xs text-slate-400">Solenoid fires air pusher kicking bad can into blue collection bin.</p>
