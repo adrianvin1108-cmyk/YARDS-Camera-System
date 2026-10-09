@@ -103,6 +103,7 @@
       const [cameraWD, setCameraWD] = useState(450);
       const [cameraHeight, setCameraHeight] = useState(420);
       const [canSize, setCanSize] = useState('12oz');
+      const [canAppearance, setCanAppearance] = useState('silver');
       const [autoDefectRate, setAutoDefectRate] = useState(10);
       const [queuedCount, setQueuedCount] = useState(0);
       const defectQueueRef = useRef([]);
@@ -142,6 +143,7 @@
       const viewRef = useRef(viewPreset);
       const canSizeRef = useRef(canSize);
       const autoRateRef = useRef(autoDefectRate);
+      const appearanceRef = useRef(canAppearance);
       const spawnRef = useRef(null);
       const inspectRef = useRef(null);
       const rejectRef = useRef(null);
@@ -151,6 +153,46 @@
       viewRef.current = viewPreset;
       canSizeRef.current = canSize;
       autoRateRef.current = autoDefectRate;
+      appearanceRef.current = canAppearance;
+
+      // Update cans already traveling on the conveyor as well as future cans.
+      useEffect(() => {
+        cansRef.current.forEach(can => {
+          if (can.labelMesh) can.labelMesh.visible = canAppearance === 'yards';
+        });
+      }, [canAppearance]);
+
+      // The graphic is generated on a canvas: no image files or external textures needed.
+      const labelTextureRef = useRef(null);
+      if (!labelTextureRef.current) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#f5e8cf';
+        ctx.fillRect(0, 0, 1024, 512);
+        ctx.fillStyle = '#9c2026';
+        ctx.fillRect(0, 0, 1024, 78);
+        ctx.fillRect(0, 438, 1024, 74);
+        ctx.fillStyle = '#152b3b';
+        ctx.fillRect(0, 78, 1024, 8);
+        ctx.fillRect(0, 428, 1024, 10);
+        for (let x = 0; x < 1024; x += 512) {
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#172d3e';
+          ctx.font = 'bold 114px Arial, sans-serif';
+          ctx.fillText('YARDS', x + 256, 265);
+          ctx.font = 'bold 29px Arial, sans-serif';
+          ctx.fillText('BREWING COMPANY', x + 256, 311);
+          ctx.fillStyle = '#9c2026';
+          ctx.font = 'bold 22px Arial, sans-serif';
+          ctx.fillText('PHILADELPHIA', x + 256, 365);
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace || undefined;
+        texture.anisotropy = 4;
+        labelTextureRef.current = texture;
+      }
 
       const queueDefect = (type) => {
         defectQueueRef.current.push(type);
@@ -413,21 +455,72 @@
         const spec = CAN_SIZES[canSizeRef.current];
         const canGroup = new THREE.Group();
 
-        const bodyGeo = new THREE.CylinderGeometry(spec.radius, spec.radius, 0.7 * spec.hFactor, 32);
+        const h = 0.7 * spec.hFactor;
+        const r = spec.radius;
+        // Lathed aluminum silhouette with rolled base, tapered shoulders and neck.
+        const profile = [
+          [r * .75, -h / 2], [r * .85, -h / 2 + .018],
+          [r * .98, -h / 2 + .052], [r, -h / 2 + .09],
+          [r, h / 2 - .14], [r * .98, h / 2 - .105],
+          [r * .86, h / 2 - .050], [r * .84, h / 2 - .018],
+          [r * .86, h / 2]
+        ].map(([radius, y]) => new THREE.Vector2(radius, y));
+        const bodyGeo = new THREE.LatheGeometry(profile, 64);
         const canMat = new THREE.MeshStandardMaterial({
-          color: 0xe2e8f0,
-          metalness: 0.95,
-          roughness: 0.15
+          color: 0xdce5ea, metalness: 0.82, roughness: 0.26,
+          envMapIntensity: 0.8, side: THREE.DoubleSide
         });
         const body = new THREE.Mesh(bodyGeo, canMat);
         body.castShadow = true;
+        body.receiveShadow = true;
         canGroup.add(body);
 
-        const rimGeo = new THREE.TorusGeometry(spec.radius - 0.02, 0.025, 16, 32);
+        // Cylindrical printed wrap, deliberately below the shaped shoulder.
+        const labelHeight = h * 0.53;
+        const labelGeo = new THREE.CylinderGeometry(r * 1.006, r * 1.006, labelHeight, 64, 1, true);
+        const labelMat = new THREE.MeshStandardMaterial({
+          map: labelTextureRef.current, metalness: 0.26, roughness: 0.42,
+          side: THREE.DoubleSide
+        });
+        const labelMesh = new THREE.Mesh(labelGeo, labelMat);
+        labelMesh.position.y = -h * 0.015;
+        labelMesh.visible = appearanceRef.current === 'yards';
+        canGroup.add(labelMesh);
+
+        // Recessed end and silver rolled upper lip.
+        const lidMat = new THREE.MeshStandardMaterial({ color: 0xcbd5dd, metalness: 0.88, roughness: 0.32, side: THREE.DoubleSide });
+        const lid = new THREE.Mesh(new THREE.CircleGeometry(r * .80, 64), lidMat);
+        lid.rotation.x = -Math.PI / 2;
+        lid.position.y = h / 2 - .015;
+        canGroup.add(lid);
+        const rimGeo = new THREE.TorusGeometry(r * .86, .014, 12, 64);
         rimGeo.rotateX(Math.PI / 2);
-        const rimMesh = new THREE.Mesh(rimGeo, canMat);
-        rimMesh.position.y = (0.35 * spec.hFactor);
+        const rimMesh = new THREE.Mesh(rimGeo, lidMat);
+        rimMesh.position.y = h / 2 + .002;
         canGroup.add(rimMesh);
+        const innerRing = new THREE.Mesh(new THREE.TorusGeometry(r * .62, .005, 8, 48), lidMat);
+        innerRing.rotation.x = Math.PI / 2;
+        innerRing.position.y = h / 2 - .012;
+        canGroup.add(innerRing);
+        // Scored opening and pull tab detail; both follow lid when rim is deformed.
+        const score = new THREE.Mesh(new THREE.TorusGeometry(r * .40, .0035, 8, 48),
+          new THREE.MeshStandardMaterial({ color: 0x82919f, metalness: .65, roughness: .4 }));
+        score.rotation.x = Math.PI / 2;
+        score.scale.set(1, .72, 1);
+        score.position.set(0, h / 2 - .008, -.025);
+        canGroup.add(score);
+        const tab = new THREE.Mesh(new THREE.BoxGeometry(r * .26, .006, r * .63), lidMat);
+        tab.position.set(0, h / 2 - .003, .025);
+        canGroup.add(tab);
+        const rivet = new THREE.Mesh(new THREE.SphereGeometry(.012, 10, 8), lidMat);
+        rivet.scale.y = .25;
+        rivet.position.set(0, h / 2 + .002, -.045);
+        canGroup.add(rivet);
+        // Concave-looking underside lip, visible from side/rejection view.
+        const baseRing = new THREE.Mesh(new THREE.TorusGeometry(r * .76, .014, 10, 48), lidMat);
+        baseRing.rotation.x = Math.PI / 2;
+        baseRing.position.y = -h / 2 + .004;
+        canGroup.add(baseRing);
 
         // Manually queued defective cans take priority over random defects.
         // Queued cans enter at the next naturally spaced position.
@@ -442,31 +535,35 @@
 
         if (currentDefect === 'OD_OFFSET') {
           body.scale.set(1.06, 1, 1.06);
+          labelMesh.scale.set(1.06, 1, 1.06);
           rimMesh.scale.set(1.06, 1.06, 1.06);
         } else if (currentDefect === 'BENT_RIM') {
           rimMesh.rotation.z = 0.35;
           rimMesh.position.x += 0.03;
         } else if (currentDefect === 'DENT') {
           body.scale.set(0.85, 1, 1.15);
+          labelMesh.scale.set(0.85, 1, 1.15);
         } else if (currentDefect === 'CRUSHED') {
           body.scale.set(1.05, 0.8, 1.05);
+          labelMesh.scale.set(1.05, 0.8, 1.05);
           rimMesh.position.y *= 0.82;
         } else if (currentDefect === 'CONTAMINATION') {
           const stainGeo = new THREE.CircleGeometry(0.12, 16);
           stainGeo.rotateX(-Math.PI / 2);
           const stainMat = new THREE.MeshBasicMaterial({ color: 0x3b0764 });
           const stain = new THREE.Mesh(stainGeo, stainMat);
-          stain.position.set(0.05, (0.36 * spec.hFactor), 0.02);
+          stain.position.set(0.05, h / 2 + .009, 0.02);
           canGroup.add(stain);
         }
 
         const idStr = `CAN-${canIdCounter.current++}`;
-        canGroup.position.set(-4.8, 0.92 + (0.35 * spec.hFactor), 0);
+        canGroup.position.set(-4.8, 0.92 + h / 2, 0);
         sceneRef.current.add(canGroup);
 
         cansRef.current.push({
           id: idStr,
           mesh: canGroup,
+          labelMesh,
           inspected: false,
           isDefect: currentDefect !== 'NONE',
           defectType: currentDefect,
@@ -697,6 +794,15 @@
                       />
                     </div>
 
+                    <div className="pt-3 border-t border-slate-800">
+                      <label htmlFor="can-appearance" className="text-[11px] text-slate-400 block mb-1">Can Appearance:</label>
+                      <select id="can-appearance" value={canAppearance} onChange={e => setCanAppearance(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs font-mono text-slate-200">
+                        <option value="silver">Plain silver aluminum</option>
+                        <option value="yards">YARDS-inspired branded can</option>
+                      </select>
+                      <p className="text-[10px] mt-1 text-slate-500">Changes all cans on the line immediately. Concept branding, not an official product label.</p>
+                    </div>
                     <div className="pt-2">
                       <label className="text-[11px] text-slate-400 block mb-1">Can Format Spec:</label>
                       <select 
