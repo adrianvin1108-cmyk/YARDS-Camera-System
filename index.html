@@ -72,6 +72,12 @@
     .yards-bg-accent {
       background-color: #dc2626;
     }
+    .industrial-stage .glass-panel { background: rgba(13, 23, 43, .95); border-color: rgba(63, 81, 112, .75); }
+    .industrial-stage canvas { display: block; }
+    @media (max-width: 1050px) {
+      .industrial-controls { position: relative !important; top: auto !important; right: auto !important; width: 100% !important; max-height: none !important; display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 12px; padding: 12px; }
+      .industrial-controls > div { margin: 0 !important; }
+    }
   </style>
 </head>
 <body>
@@ -674,22 +680,20 @@
         <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100">
           
           {/* STICKY HEADER */}
-          <header className="sticky top-0 h-16 border-b border-slate-800 bg-slate-900/95 backdrop-blur px-6 flex items-center justify-between z-50">
+          <header className="sticky top-0 min-h-16 border-b border-sky-950 bg-[#0c1426]/95 backdrop-blur px-4 flex flex-wrap items-center justify-between gap-3 py-2 z-50">
             <div className="flex items-center space-x-4">
-              <div className="h-9 w-9 rounded-lg yards-bg-accent flex items-center justify-center font-bold text-white shadow-lg shadow-red-600/30">
-                Y
-              </div>
+              <div className="px-3 py-2 bg-amber-100 text-slate-900 rounded border-2 border-amber-600 font-serif font-black text-sm tracking-wide shadow-lg">YARDS</div>
               <div>
                 <div className="flex items-center space-x-2">
-                  <h1 className="font-bold text-lg tracking-tight">YARDS BREWING COMPANY</h1>
+                  <h1 className="font-bold text-sm md:text-base tracking-tight text-amber-300">Pre-Fill Can Flange Defect Inspection Cell</h1>
                   <span className="text-xs bg-red-950/80 text-red-400 border border-red-800/60 px-2 py-0.5 rounded font-mono">IST 440W CAPSTONE</span>
                 </div>
-                <p className="text-xs text-slate-400">AI Can Defect Detection & Removal System • Keyence VS-C320 Digital Twin</p>
+                <p className="text-[11px] text-slate-400">Industrial 3D Prototype • YARDS Brewing • Penn State Capstone</p>
               </div>
             </div>
 
-            <nav className="hidden md:flex items-center space-x-2">
-              <a href="#simulation" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">3D Simulation</a>
+            <nav className="flex flex-wrap items-center gap-1">
+              <a href="#simulation" className="px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950">⬡ 3D Prototype CAD</a>
               <a href="#vision" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Vision HUD</a>
               <a href="#workflow" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Workflow</a>
               <a href="#architecture" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200">Architecture</a>
@@ -706,14 +710,14 @@
             </div>
           </header>
 
-          {/* MAIN SCROLLABLE CONTENT CONTAINER */}
-          <main className="flex-1 flex flex-col space-y-12 p-6 max-w-7xl mx-auto w-full">
+          {/* MAIN CONTENT */}
+          <main className="flex-1 flex flex-col space-y-12 p-3 md:p-4 w-full">
             
             {/* SECTION 1: 3D DIGITAL TWIN SIMULATION */}
-            <section id="simulation" className="space-y-4">
+            <section id="simulation" className="relative space-y-2 scroll-mt-20">
               <div className="flex justify-between items-center">
                 <div>
-                  <h2 className="text-xl font-bold text-white tracking-wide">Interactive 3D Production Line Simulation</h2>
+                  <h2 className="text-lg font-bold text-white tracking-wide">Live Production Inspection Cell</h2>
                   <p className="text-xs text-slate-400">Live conveyor simulation with adjustable belt velocity, elevated camera optics, and pneumatic rejection.</p>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -721,14 +725,34 @@
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              <div className="industrial-stage relative rounded-xl border border-slate-700 overflow-hidden bg-[#060d19]">
                 
                 {/* 3D Canvas Viewport */}
-                <div className="lg:col-span-3 h-[520px] rounded-2xl glass-panel relative overflow-hidden shadow-2xl flex flex-col">
+                <div className="relative w-full h-[690px] md:h-[640px] overflow-hidden shadow-2xl flex flex-col">
                   <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+                  <div className="pointer-events-none absolute top-4 left-4 hidden md:block z-10 w-72 rounded-xl border border-slate-700 bg-[#0f192d]/95 p-4 shadow-2xl">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-700"><span className="text-xs font-bold text-amber-300">⌁ LINE TELEMETRY</span><span className={`text-[10px] font-mono px-2 py-1 rounded ${isRunning ? 'text-emerald-400 bg-emerald-950' : 'text-amber-400 bg-amber-950'}`}>{isRunning ? 'RUNNING' : 'PAUSED'}</span></div>
+                    <div className="mt-3 space-y-2 font-mono text-[11px]">
+                      <div className="flex justify-between"><span className="text-slate-400">Belt velocity</span><span className="text-amber-300">{beltSpeed.toFixed(1)} units/s</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Camera WD</span><span className="text-cyan-300">{cameraWD} mm</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Inspected cans</span><span className="text-emerald-400">{stats.totalInspected}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Rejected cans</span><span className="text-rose-400">{stats.airEjections}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Auto defect chance</span><span className="text-amber-300">{autoDefectRate}%</span></div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-700 flex gap-2 pointer-events-auto">
+                      <button onClick={() => setIsRunning(v => !v)} className="flex-1 rounded bg-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-600">{isRunning ? 'Ⅱ Pause' : '▶ Resume'}</button>
+                      <button onClick={() => queueDefect('BENT_RIM')} className="flex-1 rounded bg-rose-950 border border-rose-700 px-2 py-2 text-xs text-rose-200 hover:bg-rose-900">⚠ Inject Defect</button>
+                    </div>
+                  </div>
+                  <div className="pointer-events-none absolute bottom-24 left-4 hidden md:block z-10 w-56 rounded-xl border border-slate-700 bg-[#101c31]/95 p-3 shadow-xl">
+                    <div className="flex justify-between text-[11px] font-bold pb-2"><span className="text-cyan-300">▣ LIVE CAMERA HUD</span><span className={currentScan.status === 'PASS' ? 'text-emerald-400' : 'text-red-400'}>{currentScan.status}</span></div>
+                    <div className="relative mx-auto h-28 rounded bg-[#030b18] border border-slate-800 flex justify-center items-center"><div className={`w-20 h-20 rounded-full border-2 ${currentScan.status === 'PASS' ? 'border-emerald-400' : 'border-red-400'} flex justify-center items-center`}><div className="w-14 h-14 rounded-full border border-cyan-400" /></div></div>
+                    <div className="pt-2 text-[10px] font-mono flex justify-between"><span>Measured OD</span><span className="text-cyan-300">{currentScan.measuredOD} mm</span></div>
+                    <div className="text-[10px] font-mono flex justify-between"><span>Last can</span><span className="text-slate-300">{currentScan.canId}</span></div>
+                  </div>
                   
                   {/* View Presets Floating Toolbar */}
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 glass-panel px-4 py-2 rounded-xl flex items-center space-x-2 z-10">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 glass-panel px-3 py-2 rounded-xl flex flex-wrap justify-center items-center gap-1 z-10 w-max max-w-[95%]">
                     <span className="text-xs font-bold text-slate-400 mr-2">3D Views:</span>
                     <button onClick={() => setViewPreset('isometric')} className={`px-3 py-1 rounded text-xs font-medium ${viewPreset === 'isometric' ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300'}`}>Isometric</button>
                     <button onClick={() => setViewPreset('top')} className={`px-3 py-1 rounded text-xs font-medium ${viewPreset === 'top' ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300'}`}>Top View</button>
@@ -738,7 +762,7 @@
                 </div>
 
                 {/* Simulation Control Sidebar */}
-                <div className="space-y-4">
+                <div className="industrial-controls absolute top-4 right-4 w-[285px] max-h-[560px] overflow-y-auto space-y-3 z-20 rounded-xl">
                   
                   <div className="glass-panel p-4 rounded-xl space-y-3">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">Conveyor Belt Speed</h3>
