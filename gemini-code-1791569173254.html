@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yards Brewing - AI Can Defect Detection Digital Twin</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Compiler -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0b0f17;
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    
+    /* Range Slider Styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: #1e293b;
+      border-radius: 4px;
+      height: 6px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 16px;
+      width: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+      border: 2px solid #0f172a;
+    }
+    
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.5);
+    }
+    
+    .glass-card {
+      background: rgba(30, 41, 59, 0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(71, 85, 105, 0.4);
+    }
+    
+    .yards-accent {
+      color: #ef4444;
+    }
+    .yards-bg-accent {
+      background-color: #dc2626;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- CONSTANTS & CONFIGURATION ---
+    const CAN_SIZES = {
+      '12oz': { name: '12 oz Standard', height: 122.7, od: 66.0, id: 54.0, radius: 0.33, hFactor: 1.0 },
+      '16oz': { name: '16 oz Tallboy', height: 157.2, od: 66.0, id: 54.0, radius: 0.33, hFactor: 1.28 },
+      '19.2oz': { name: '19.2 oz Stovepipe', height: 182.6, od: 66.0, id: 54.0, radius: 0.33, hFactor: 1.48 },
+      'sleek': { name: '12 oz Sleek', height: 148.0, od: 58.0, id: 48.0, radius: 0.29, hFactor: 1.2 },
+      'stubby': { name: '8 oz Stubby', height: 92.0, od: 66.0, id: 54.0, radius: 0.33, hFactor: 0.75 }
+    };
+
+    const DEFECT_TYPES = {
+      'NONE': { name: 'Good Can', severity: 'PASS', desc: 'Flange & Rim within specifications', color: '#22c55e' },
+      'BENT_RIM': { name: 'Bent Flange Rim', severity: 'FAIL', desc: 'Deformed top lip curvature', color: '#ef4444' },
+      'OD_OFFSET': { name: 'Incorrect OD', severity: 'FAIL', desc: 'Outer diameter exceeds ±0.5mm', color: '#f59e0b' },
+      'DENT': { name: 'Sidewall Dent', severity: 'FAIL', desc: 'Physical body impact deformation', color: '#ec4899' },
+      'CRUSHED': { name: 'Crushed Flange', severity: 'FAIL', desc: 'Vertical compression on top chime', color: '#dc2626' },
+      'CONTAMINATION': { name: 'Foreign Stain', severity: 'FAIL', desc: 'Dark surface residue on lid', color: '#a855f7' }
+    };
+
+    // Main Digital Twin Application
+    function App() {
+      // Simulation States
+      const [isRunning, setIsRunning] = useState(true);
+      const [cpm, setCpm] = useState(220); // Cans per minute target
+      const [cameraWD, setCameraWD] = useState(450); // Working distance in mm (ELEVATED RANGE 200-800mm)
+      const [cameraHeight, setCameraHeight] = useState(420); // Extended height slider (200-900mm)
+      const [canSize, setCanSize] = useState('12oz');
+      const [selectedDefect, setSelectedDefect] = useState('NONE');
+      const [nextDefectInject, setNextDefectInject] = useState(null);
+      const [viewPreset, setViewPreset] = useState('isometric');
+      const [explodedPercent, setExplodedPercent] = useState(0);
+      const [lightingIntensity, setLightingIntensity] = useState(85);
+      const [activeTab, setActiveTab] = useState('3d'); // 3d, hud, workflow, arch, reqs, log, specs
+      const [autoDemo, setAutoDemo] = useState(false);
+      
+      // OpenCV & Machine Vision Parameters
+      const [visionMode, setVisionMode] = useState('HYBRID'); // RULE_BASED, AI, HYBRID
+      const [inspectionLatency, setInspectionLatency] = useState(18); // ms
+      const [currentScan, setCurrentScan] = useState({
+        canId: 'CAN-000',
+        status: 'PASS',
+        measuredOD: 66.02,
+        measuredID: 53.98,
+        circularity: 99.4,
+        confidence: 99.2,
+        defectType: 'NONE',
+        timestamp: new Date().toLocaleTimeString()
+      });
+
+      // Stats Telemetry
+      const [stats, setStats] = useState({
+        totalInspected: 0,
+        totalPassed: 0,
+        totalFailed: 0,
+        airEjections: 0,
+        lastEjectTime: '--'
+      });
+
+      // Inspection History Log
+      const [logs, setLogs] = useState([]);
+      const [logFilter, setLogFilter] = useState('ALL');
+
+      // References
+      const mountRef = useRef(null);
+      const sceneRef = useRef(null);
+      const cansRef = useRef([]);
+      const pusherMeshRef = useRef(null);
+      const cameraRigRef = useRef(null);
+      const cameraObjRef = useRef(null);
+      const canIdCounter = useRef(1001);
+
+      // --- THREE.JS SCENE SETUP ---
+      useEffect(() => {
+        const container = mountRef.current;
+        if (!container) return;
+
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        // Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        sceneRef.current = scene;
+        scene.background = new THREE.Color('#070a11');
+        scene.fog = new THREE.FogExp2('#070a11', 0.08);
+
+        const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        cameraObjRef.current = camera;
+        camera.position.set(2.8, 2.5, 3.2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // Grid Floor
+        const gridHelper = new THREE.GridHelper(20, 40, 0x334155, 0x1e293b);
+        gridHelper.position.y = -0.01;
+        scene.add(gridHelper);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(5, 8, 4);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- CONVEYOR LINE BUILD ---
+        const conveyorGroup = new THREE.Group();
+        scene.add(conveyorGroup);
+
+        // Conveyor Bed
+        const bedGeo = new THREE.BoxGeometry(10, 0.2, 0.8);
+        const bedMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.8 });
+        const bed = new THREE.Mesh(bedGeo, bedMat);
+        bed.position.set(0, 0.8, 0);
+        bed.receiveShadow = true;
+        conveyorGroup.add(bed);
+
+        // Belt Surface
+        const beltGeo = new THREE.BoxGeometry(10, 0.02, 0.6);
+        const beltMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+        const belt = new THREE.Mesh(beltGeo, beltMat);
+        belt.position.set(0, 0.91, 0);
+        conveyorGroup.add(belt);
+
+        // Side Guard Rails
+        const railGeo = new THREE.BoxGeometry(10, 0.08, 0.04);
+        const railMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.9, roughness: 0.2 });
+        const railL = new THREE.Mesh(railGeo, railMat);
+        railL.position.set(0, 0.98, -0.32);
+        const railR = new THREE.Mesh(railGeo, railMat);
+        railR.position.set(0, 0.98, 0.32);
+        conveyorGroup.add(railL, railR);
+
+        // Legs
+        for (let x = -4; x <= 4; x += 2) {
+          const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.8);
+          const legMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7 });
+          const leg1 = new THREE.Mesh(legGeo, legMat);
+          leg1.position.set(x, 0.4, -0.35);
+          const leg2 = new THREE.Mesh(legGeo, legMat);
+          leg2.position.set(x, 0.4, 0.35);
+          conveyorGroup.add(leg1, leg2);
+        }
+
+        // --- CAMERA GANTRY & KEYENCE VS-C320 SMART CAMERA ---
+        const gantryGroup = new THREE.Group();
+        gantryGroup.position.set(0, 0, 0);
+        scene.add(gantryGroup);
+        cameraRigRef.current = gantryGroup;
+
+        // Vertical Pillars
+        const pillarGeo = new THREE.BoxGeometry(0.06, 2.2, 0.06);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.6, roughness: 0.3 });
+        const p1 = new THREE.Mesh(pillarGeo, frameMat);
+        p1.position.set(-0.15, 1.8, -0.45);
+        const p2 = new THREE.Mesh(pillarGeo, frameMat);
+        p2.position.set(-0.15, 1.8, 0.45);
+        gantryGroup.add(p1, p2);
+
+        // Top Bridge Bar
+        const bridgeGeo = new THREE.BoxGeometry(0.1, 0.08, 0.96);
+        const bridge = new THREE.Mesh(bridgeGeo, frameMat);
+        bridge.position.set(-0.15, 2.8, 0);
+        gantryGroup.add(bridge);
+
+        // Keyence Camera Body
+        const camBodyGroup = new THREE.Group();
+        camBodyGroup.position.set(0, 1.8, 0); // Dynamic height
+        gantryGroup.add(camBodyGroup);
+
+        const keyenceBodyGeo = new THREE.BoxGeometry(0.2, 0.28, 0.2);
+        const keyenceMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.2 });
+        const keyenceMesh = new THREE.Mesh(keyenceBodyGeo, keyenceMat);
+        camBodyGroup.add(keyenceMesh);
+
+        // Camera Lens Cylinder
+        const lensGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.1, 32);
+        const lensMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.1 });
+        const lens = new THREE.Mesh(lensGeo, lensMat);
+        lens.position.set(0, -0.15, 0);
+        camBodyGroup.add(lens);
+
+        // Ring Light LED
+        const ringGeo = new THREE.TorusGeometry(0.12, 0.025, 16, 32);
+        const ringMat = new THREE.MeshStandardMaterial({ color: 0xe0f2fe, emissive: 0x38bdf8, emissiveIntensity: 0.8 });
+        const ringLight = new THREE.Mesh(ringGeo, ringMat);
+        ringLight.rotation.x = Math.PI / 2;
+        ringLight.position.set(0, -0.18, 0);
+        camBodyGroup.add(ringLight);
+
+        // Vision Inspection Laser Cone
+        const coneGeo = new THREE.ConeGeometry(0.28, 0.8, 32, 1, true);
+        const coneMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.18, wireframe: true });
+        const laserCone = new THREE.Mesh(coneGeo, coneMat);
+        laserCone.position.set(0, -0.55, 0);
+        camBodyGroup.add(laserCone);
+
+        // --- PNEUMATIC REJECTOR STATION (X = 2.2m) ---
+        const rejectGroup = new THREE.Group();
+        rejectGroup.position.set(2.2, 0.92, 0);
+        scene.add(rejectGroup);
+
+        // Solenoid Air Cylinder
+        const cylGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.3, 16);
+        cylGeo.rotateX(Math.PI / 2);
+        const cylMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8 });
+        const cyl = new THREE.Mesh(cylGeo, cylMat);
+        cyl.position.set(0, 0.1, -0.4);
+        rejectGroup.add(cyl);
+
+        // Pusher Pad
+        const padGeo = new THREE.BoxGeometry(0.22, 0.15, 0.03);
+        const padMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 });
+        const pusher = new THREE.Mesh(padGeo, padMat);
+        pusher.position.set(0, 0.1, -0.22);
+        rejectGroup.add(pusher);
+        pusherMeshRef.current = pusher;
+
+        // Defect Rejection Collection Bin
+        const binGeo = new THREE.BoxGeometry(0.7, 0.5, 0.6);
+        const binMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, transparent: true, opacity: 0.7 });
+        const bin = new THREE.Mesh(binGeo, binMat);
+        bin.position.set(0, -0.2, 0.65);
+        rejectGroup.add(bin);
+
+        // Trigger Photoelectric Sensor (X = -0.6m)
+        const sensorGeo = new THREE.BoxGeometry(0.05, 0.08, 0.05);
+        const sensorMat = new THREE.MeshStandardMaterial({ color: 0xeab308 });
+        const peSensor = new THREE.Mesh(sensorGeo, sensorMat);
+        peSensor.position.set(-0.6, 1.05, -0.32);
+        scene.add(peSensor);
+
+        // --- ANIMATION & PHYSICS LOOP ---
+        let lastTime = performance.now();
+        let spawnTimer = 0;
+
+        const animate = (time) => {
+          requestAnimationFrame(animate);
+          const dt = (time - lastTime) / 1000;
+          lastTime = time;
+
+          // Orbit camera positioning based on presets
+          if (viewPreset === 'top') {
+            camera.position.set(0, 4.5, 0.001);
+            camera.lookAt(0, 0, 0);
+          } else if (viewPreset === 'side') {
+            camera.position.set(0, 1.2, 3.5);
+            camera.lookAt(0, 1.0, 0);
+          } else if (viewPreset === 'reject') {
+            camera.position.set(2.2, 1.8, 1.8);
+            camera.lookAt(2.2, 0.9, 0);
+          } else { // Isometric
+            camera.position.set(2.8, 2.5, 3.2);
+            camera.lookAt(0, 0.9, 0);
+          }
+
+          if (isRunning) {
+            // Conveyor movement speed calculated from CPM
+            // Nominal 220 CPM -> ~0.85 units/sec velocity
+            const beltSpeed = (cpm / 220) * 0.9;
+
+            // Spawn Cans
+            spawnTimer += dt;
+            const spawnInterval = 60 / cpm; // Seconds per can
+            if (spawnTimer >= spawnInterval) {
+              spawnTimer = 0;
+              spawnCan();
+            }
+
+            // Move Cans along belt
+            cansRef.current.forEach((canObj, idx) => {
+              if (!canObj.ejected) {
+                canObj.mesh.position.x += beltSpeed * dt;
+
+                // Photoelectric Sensor Trigger Scan (X = 0)
+                if (!canObj.inspected && canObj.mesh.position.x >= 0) {
+                  canObj.inspected = true;
+                  evaluateInspection(canObj);
+                }
+
+                // Downstream Reject Pneumatic Air Blast (X = 2.2m)
+                if (canObj.isDefect && !canObj.ejectionTriggered && canObj.mesh.position.x >= 2.15) {
+                  canObj.ejectionTriggered = true;
+                  triggerAirReject(canObj);
+                }
+
+                // Cleanup Off-screen Cans
+                if (canObj.mesh.position.x > 5.0) {
+                  scene.remove(canObj.mesh);
+                  cansRef.current.splice(idx, 1);
+                }
+              } else {
+                // Physics trajectory for kicked cans falling into bin
+                canObj.mesh.position.z += 2.5 * dt;
+                canObj.mesh.position.y -= 1.8 * dt;
+                canObj.mesh.rotation.x += 5 * dt;
+                canObj.mesh.rotation.z += 3 * dt;
+
+                if (canObj.mesh.position.y <= 0.4) {
+                  scene.remove(canObj.mesh);
+                  cansRef.current.splice(idx, 1);
+                }
+              }
+            });
+          }
+
+          renderer.render(scene, camera);
+        };
+
+        animate(performance.now());
+
+        const handleResize = () => {
+          if (!container) return;
+          camera.aspect = container.clientWidth / container.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(container.clientWidth, container.clientHeight);
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+          window.removeEventListener('resize', handleResize);
+          if (container.contains(renderer.domElement)) {
+            container.removeChild(renderer.domElement);
+          }
+        };
+      }, [cpm, isRunning, viewPreset]);
+
+      // --- SPAWN CAN GEOMETRY & PROCEDURAL DEFECTS ---
+      const spawnCan = () => {
+        if (!sceneRef.current) return;
+        const spec = CAN_SIZES[canSize];
+        const canGroup = new THREE.Group();
+
+        // Aluminum Metallic Body
+        const bodyGeo = new THREE.CylinderGeometry(spec.radius, spec.radius, 0.7 * spec.hFactor, 32);
+        const canMat = new THREE.MeshStandardMaterial({
+          color: 0xe2e8f0,
+          metalness: 0.95,
+          roughness: 0.15
+        });
+        const body = new THREE.Mesh(bodyGeo, canMat);
+        body.castShadow = true;
+        canGroup.add(body);
+
+        // Top Aluminum Flange Lip (Rim)
+        const rimGeo = new THREE.TorusGeometry(spec.radius - 0.02, 0.025, 16, 32);
+        rimGeo.rotateX(Math.PI / 2);
+        const rimMesh = new THREE.Mesh(rimGeo, canMat);
+        rimMesh.position.y = (0.35 * spec.hFactor);
+        canGroup.add(rimMesh);
+
+        // Determine Defect Condition
+        let currentDefect = 'NONE';
+        if (nextDefectInject) {
+          currentDefect = nextDefectInject;
+          setNextDefectInject(null);
+        } else if (selectedDefect !== 'NONE') {
+          currentDefect = selectedDefect;
+        }
+
+        // Apply Procedural 3D Mesh Deformations
+        if (currentDefect === 'BENT_RIM') {
+          rimMesh.rotation.z = 0.35;
+          rimMesh.position.x += 0.03;
+        } else if (currentDefect === 'DENT') {
+          body.scale.set(0.85, 1, 1.15);
+        } else if (currentDefect === 'CRUSHED') {
+          body.scale.set(1.05, 0.8, 1.05);
+          rimMesh.position.y *= 0.82;
+        } else if (currentDefect === 'CONTAMINATION') {
+          const stainGeo = new THREE.CircleGeometry(0.12, 16);
+          stainGeo.rotateX(-Math.PI / 2);
+          const stainMat = new THREE.MeshBasicMaterial({ color: 0x3b0764 });
+          const stain = new THREE.Mesh(stainGeo, stainMat);
+          stain.position.set(0.05, (0.36 * spec.hFactor), 0.02);
+          canGroup.add(stain);
+        }
+
+        const idStr = `CAN-${canIdCounter.current++}`;
+        canGroup.position.set(-4.8, 0.92 + (0.35 * spec.hFactor), 0);
+        sceneRef.current.add(canGroup);
+
+        cansRef.current.push({
+          id: idStr,
+          mesh: canGroup,
+          inspected: false,
+          isDefect: currentDefect !== 'NONE',
+          defectType: currentDefect,
+          ejected: false,
+          ejectionTriggered: false
+        });
+      };
+
+      // --- OPENCV VISION INSPECTION PIPELINE SIMULATION ---
+      const evaluateInspection = (canObj) => {
+        const spec = CAN_SIZES[canSize];
+        const isFail = canObj.isDefect;
+        
+        let measuredOD = spec.od + (Math.random() * 0.18 - 0.09);
+        let measuredID = spec.id + (Math.random() * 0.16 - 0.08);
+        let circularity = 99.2 + (Math.random() * 0.6 - 0.3);
+        let confidence = 98.8 + (Math.random() * 1.0);
+
+        if (canObj.defectType === 'BENT_RIM') {
+          circularity = 86.4;
+          confidence = 94.1;
+        } else if (canObj.defectType === 'OD_OFFSET') {
+          measuredOD = spec.od + 1.15; // Exceeds tolerance
+          confidence = 97.6;
+        } else if (canObj.defectType === 'DENT') {
+          circularity = 91.2;
+          confidence = 92.5;
+        } else if (canObj.defectType === 'CRUSHED') {
+          measuredID = spec.id - 2.4;
+          circularity = 81.0;
+        } else if (canObj.defectType === 'CONTAMINATION') {
+          confidence = 88.0;
+        }
+
+        const statusStr = isFail ? 'FAIL' : 'PASS';
+        const scanResult = {
+          canId: canObj.id,
+          status: statusStr,
+          measuredOD: parseFloat(measuredOD.toFixed(2)),
+          measuredID: parseFloat(measuredID.toFixed(2)),
+          circularity: parseFloat(circularity.toFixed(1)),
+          confidence: parseFloat(confidence.toFixed(1)),
+          defectType: canObj.defectType,
+          timestamp: new Date().toLocaleTimeString()
+        };
+
+        setCurrentScan(scanResult);
+
+        // Update Statistics
+        setStats(prev => ({
+          ...prev,
+          totalInspected: prev.totalInspected + 1,
+          totalPassed: isFail ? prev.totalPassed : prev.totalPassed + 1,
+          totalFailed: isFail ? prev.totalFailed + 1 : prev.totalFailed
+        }));
+
+        // Append to Log
+        setLogs(prev => [scanResult, ...prev.slice(0, 49)]);
+      };
+
+      // --- PNEUMATIC AIR JET REJECTION ACTION ---
+      const triggerAirReject = (canObj) => {
+        canObj.ejected = true;
+        
+        // Animate Pusher Extension
+        if (pusherMeshRef.current) {
+          pusherMeshRef.current.position.z = -0.05;
+          setTimeout(() => {
+            if (pusherMeshRef.current) pusherMeshRef.current.position.z = -0.22;
+          }, 150);
+        }
+
+        setStats(prev => ({
+          ...prev,
+          airEjections: prev.airEjections + 1,
+          lastEjectTime: new Date().toLocaleTimeString()
+        }));
+      };
+
+      // Dynamically Update Camera Gantry Elevation
+      useEffect(() => {
+        if (cameraRigRef.current) {
+          // Move internal camera body height based on height slider
+          const heightY = 1.0 + (cameraHeight / 400);
+          cameraRigRef.current.children[3].position.y = heightY; 
+        }
+      }, [cameraHeight, cameraWD]);
+
+      // Filtered Logs
+      const filteredLogs = useMemo(() => {
+        if (logFilter === 'PASS') return logs.filter(l => l.status === 'PASS');
+        if (logFilter === 'FAIL') return logs.filter(l => l.status === 'FAIL');
+        return logs;
+      }, [logs, logFilter]);
+
+      // CSV Export Function
+      const exportCSV = () => {
+        const headers = "Can ID,Timestamp,Status,Defect Type,Measured OD (mm),Measured ID (mm),Circularity (%),Confidence (%)\n";
+        const rows = logs.map(l => `${l.canId},${l.timestamp},${l.status},${l.defectType},${l.measuredOD},${l.measuredID},${l.circularity},${l.confidence}`).join("\n");
+        const blob = new Blob([headers + rows], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Yards_Inspection_Log_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+      };
+
+      return (
+        <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+          
+          {/* HEADER / TOP NAVIGATION BRANDING */}
+          <header className="h-16 border-b border-slate-800 bg-slate-900/90 px-6 flex items-center justify-between z-20">
+            <div className="flex items-center space-x-4">
+              <div className="h-9 w-9 rounded-lg yards-bg-accent flex items-center justify-center font-bold text-white shadow-lg shadow-red-600/30">
+                Y
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h1 className="font-bold text-lg tracking-tight">YARDS BREWING COMPANY</h1>
+                  <span className="text-xs bg-red-950/80 text-red-400 border border-red-800/60 px-2 py-0.5 rounded font-mono">IST 440W CAPSTONE</span>
+                </div>
+                <p className="text-xs text-slate-400">AI Can Defect Detection & Removal System • Keyence VS-C320 Series Digital Twin</p>
+              </div>
+            </div>
+
+            {/* TAB NAVIGATION BUTTONS */}
+            <nav className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button onClick={() => setActiveTab('3d')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === '3d' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>3D Digital Twin</button>
+              <button onClick={() => setActiveTab('hud')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'hud' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Vision HUD</button>
+              <button onClick={() => setActiveTab('workflow')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'workflow' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Process Workflow</button>
+              <button onClick={() => setActiveTab('arch')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'arch' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Architecture</button>
+              <button onClick={() => setActiveTab('reqs')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'reqs' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Requirements</button>
+              <button onClick={() => setActiveTab('log')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'log' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Inspection Logs</button>
+            </nav>
+
+            {/* LINE CONTROLS */}
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => setIsRunning(!isRunning)} 
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${isRunning ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'}`}
+              >
+                <span>{isRunning ? 'Pause Line' : 'Resume Line'}</span>
+              </button>
+              <div className="text-right font-mono text-xs">
+                <div className="text-emerald-400 font-bold">{cpm} CPM</div>
+                <div className="text-slate-500">LINE SPEED</div>
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN APPLICATION CONTENT AREA */}
+          <div className="flex-1 relative flex overflow-hidden">
+
+            {/* TAB 1: 3D DIGITAL TWIN CELL */}
+            {activeTab === '3d' && (
+              <div className="relative w-
